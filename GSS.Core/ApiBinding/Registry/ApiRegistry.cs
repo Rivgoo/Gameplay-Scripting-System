@@ -3,7 +3,7 @@ using GSS.Core.ApiBinding.Exceptions;
 
 namespace GSS.Core.ApiBinding.Registry
 {
-	internal class ApiRegistry : IApiRegistry
+	public class ApiRegistry : IApiRegistry
 	{
 		private readonly Dictionary<string, IClassMetadata> _classes;
 
