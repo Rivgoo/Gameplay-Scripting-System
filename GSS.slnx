@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="GSS.Core.Tests/Gss.Core.Tests.csproj" Id="c2169f3f-56d2-491a-95b9-9fa6d1a5d174" DisplayName="GSS.Core.Tests" />
+  <Project Path="GSS.Core/GSS.Core.csproj" />
+</Solution>
