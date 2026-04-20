@@ -3,15 +3,16 @@ using GSS.Core.ApiBinding.Builders;
 
 namespace GSS.Core.ApiBinding.Registry
 {
-	public sealed partial class ApiRegistryBuilder
+	public sealed class ApiRegistryBuilder
 	{
 		private readonly Dictionary<string, IClassMetadata> _classes = new();
 
-		public void Register<T>(ApiProfile<T> configuration)
+		public void Register<T>(ApiProfile<T> profile)
 		{
 			var name = typeof(T).Name;
 			var scope = new ApiBindingScope<T>();
-			configuration.Build(scope);
+
+			profile.Build(scope);
 
 			_classes[name] = new ClassMetadata(name, scope.Methods, scope.Properties);
 		}

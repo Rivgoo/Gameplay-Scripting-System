@@ -120,6 +120,7 @@ namespace GSS.Sharp.Parsing
 					SyntaxKind.BreakKeyword => ParseBreakStatement(),
 					SyntaxKind.ContinueKeyword => ParseContinueStatement(),
 					SyntaxKind.ReturnKeyword => ParseReturnStatement(),
+					SyntaxKind.WaitKeyword => ParseWaitStatement(),
 					_ => ParseExpressionStatement()
 				};
 			}
@@ -128,6 +129,14 @@ namespace GSS.Sharp.Parsing
 				Synchronize();
 				return new ExpressionStatementSyntax(new LiteralExpressionSyntax(new SyntaxToken(SyntaxKind.NullKeyword, Current().Position, 0, Current().Source)), new SyntaxToken());
 			}
+		}
+
+		private WaitStatementSyntax ParseWaitStatement()
+		{
+			var keyword = ExpectToken(SyntaxKind.WaitKeyword);
+			var duration = ParseExpression(0);
+			var semicolon = ExpectToken(SyntaxKind.SemicolonToken);
+			return new WaitStatementSyntax(keyword, duration, semicolon);
 		}
 
 		private TypeSyntax ParseType()
@@ -348,6 +357,15 @@ namespace GSS.Sharp.Parsing
 				if (Current().Kind == SyntaxKind.OpenParenToken)
 				{
 					left = ParseCallExpression(left);
+					continue;
+				}
+
+				if (Current().Kind == SyntaxKind.OpenBracketToken)
+				{
+					var openBracket = NextToken();
+					var index = ParseExpression(0);
+					var closeBracket = ExpectToken(SyntaxKind.CloseBracketToken);
+					left = new ElementAccessExpressionSyntax(left, openBracket, index, closeBracket);
 					continue;
 				}
 

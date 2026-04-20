@@ -11,18 +11,21 @@
 		PlusPlusToken, MinusMinusToken, AmpersandAmpersandToken, PipePipeToken,
 		QuestionQuestionToken, EqualsEqualsToken, BangEqualsToken, LessToken,
 		LessOrEqualsToken, GreaterToken, GreaterOrEqualsToken, OpenParenToken,
-		CloseParenToken, OpenBraceToken, CloseBraceToken, CommaToken, DotToken,
+		CloseParenToken, OpenBraceToken, CloseBraceToken, OpenBracketToken,
+		CloseBracketToken, CommaToken, DotToken,
 		DotDotToken, SemicolonToken, QuestionToken, ColonToken, ArrowToken,
 		QuestionDotToken,
 
 		ImportKeyword, PublicKeyword, PrivateKeyword, VoidKeyword, IfKeyword,
 		ElseKeyword, WhileKeyword, ForKeyword, InKeyword, BreakKeyword,
-		ContinueKeyword, ReturnKeyword, TrueKeyword, FalseKeyword, NullKeyword, VarKeyword,
+		ContinueKeyword, ReturnKeyword, TrueKeyword, FalseKeyword, NullKeyword,
+		VarKeyword, WaitKeyword,
 
 		CompilationUnit, ImportDirective, MethodDeclaration,
 		BlockStatement, ExpressionStatement, VariableDeclaration,
 		ImplicitVariableDeclaration, IfStatement, WhileStatement,
-		ForStatement, ForEachStatement, BreakStatement, ContinueStatement, ReturnStatement,
+		ForStatement, ForEachStatement, BreakStatement, ContinueStatement,
+		ReturnStatement, WaitStatement,
 
 		IdentifierName, GenericName,
 
@@ -30,6 +33,7 @@
 		PostfixUnaryExpression, BinaryExpression, TernaryExpression,
 		NullCoalescingExpression, RangeExpression, CallExpression,
 		MemberAccessExpression, NullConditionalAccessExpression,
-		AssignmentExpression, ArrowExpressionClause, InterpolatedStringExpression
+		ElementAccessExpression, AssignmentExpression, ArrowExpressionClause,
+		InterpolatedStringExpression
 	}
 }

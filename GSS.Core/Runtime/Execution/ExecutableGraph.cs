@@ -1,18 +1,21 @@
-﻿using GSS.Core.Runtime.Instructions.Abstractions;
+﻿using GSS.Core.ApiBinding.Models;
+using GSS.Core.Compiler.Emission;
 
 namespace GSS.Core.Runtime.Execution
 {
 	public sealed class ExecutableGraph
 	{
-		public IInstruction[] Instructions { get; }
-		public int VariableCount { get; }
-		public int MaxArgumentCount { get; }
+		public Instruction[] Instructions { get; }
+		public GssValue[] ConstantsPool { get; }
+		public object[] MetadataPool { get; }
+		public int RequiredRegisters { get; }
 
-		public ExecutableGraph(IInstruction[] instructions, int variableCount, int maxArgumentCount)
+		public ExecutableGraph(Instruction[] instructions, GssValue[] constantsPool, object[] metadataPool, int requiredRegisters)
 		{
 			Instructions = instructions;
-			VariableCount = variableCount;
-			MaxArgumentCount = maxArgumentCount;
+			ConstantsPool = constantsPool;
+			MetadataPool = metadataPool;
+			RequiredRegisters = requiredRegisters;
 		}
 	}
 }

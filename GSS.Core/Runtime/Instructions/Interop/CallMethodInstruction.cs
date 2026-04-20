@@ -18,14 +18,16 @@ namespace GSS.Core.Runtime.Instructions.Interop
 
 		public ExecutionState Execute(RuntimeExecutionContext context)
 		{
-			var buffer = context.GetArgBuffer(_argumentRegisters.Length);
-
 			for (int i = 0; i < _argumentRegisters.Length; i++)
 			{
-				buffer[i] = context.GetRegister(_argumentRegisters[i]);
+				var value = context.GetRegister(_argumentRegisters[i]);
+				context.SetArg(i, value);
 			}
 
-			context.Accumulator = _method.Invoke(context.TargetInstance, buffer);
+			var argSpan = context.GetArgBufferSpan(_argumentRegisters.Length);
+
+			context.Accumulator = _method.Invoke(context.TargetInstance, argSpan);
+
 			context.InstructionPointer++;
 
 			return ExecutionState.Success;

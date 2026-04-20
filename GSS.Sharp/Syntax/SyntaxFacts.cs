@@ -22,6 +22,7 @@
 				"false" => SyntaxKind.FalseKeyword,
 				"null" => SyntaxKind.NullKeyword,
 				"var" => SyntaxKind.VarKeyword,
+				"wait" => SyntaxKind.WaitKeyword,
 				_ => SyntaxKind.IdentifierToken
 			};
 		}

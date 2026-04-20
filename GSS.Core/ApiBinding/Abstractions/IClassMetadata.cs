@@ -3,7 +3,7 @@
 	public interface IClassMetadata
 	{
 		string Name { get; }
-		IMethodMetadata RetrieveMethod(string methodName);
-		IPropertyMetadata RetrieveProperty(string propertyName);
+		bool TryRetrieveMethod(string methodName, int argumentCount, out IMethodMetadata method);
+		bool TryRetrieveProperty(string propertyName, out IPropertyMetadata property);
 	}
 }

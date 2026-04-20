@@ -238,6 +238,8 @@ namespace GSS.Sharp.Parsing
 				case '%': return new SyntaxToken(SyntaxKind.PercentToken, start, 1, _source);
 				case '(': return new SyntaxToken(SyntaxKind.OpenParenToken, start, 1, _source);
 				case ')': return new SyntaxToken(SyntaxKind.CloseParenToken, start, 1, _source);
+				case '[': return new SyntaxToken(SyntaxKind.OpenBracketToken, start, 1, _source);
+				case ']': return new SyntaxToken(SyntaxKind.CloseBracketToken, start, 1, _source);
 				case '{':
 					if (_modeStack.Peek() == LexerMode.InterpolationExpression) _interpolationBraceDepth++;
 					return new SyntaxToken(SyntaxKind.OpenBraceToken, start, 1, _source);

@@ -1,35 +1,35 @@
 ﻿using GSS.Core.ApiBinding.Abstractions;
-using GSS.Core.ApiBinding.Exceptions;
 
 namespace GSS.Core.ApiBinding.Registry
 {
-	internal class ClassMetadata : IClassMetadata
+	public sealed class ClassMetadata : IClassMetadata
 	{
 		public string Name { get; }
 		private readonly Dictionary<string, IMethodMetadata> _methods;
 		private readonly Dictionary<string, IPropertyMetadata> _properties;
 
-		public ClassMetadata(string name, Dictionary<string, IMethodMetadata> methods, Dictionary<string, IPropertyMetadata> props)
+		public ClassMetadata(string name, Dictionary<string, IMethodMetadata> methods, Dictionary<string, IPropertyMetadata> properties)
 		{
 			Name = name;
 			_methods = methods;
-			_properties = props;
+			_properties = properties;
 		}
 
-		public IMethodMetadata RetrieveMethod(string name)
+		public bool TryRetrieveMethod(string methodName, int argumentCount, out IMethodMetadata method)
 		{
-			if (!_methods.TryGetValue(name, out var meta))
-				throw new GssMemberNotFoundException(name, $"Method not found in class '{Name}'.");
+			if (_methods.TryGetValue(methodName, out var m) && m.ArgumentCount == argumentCount)
+			{
+				method = m;
+				return true;
+			}
 
-			return meta;
+			method = null!;
+			return false;
 		}
 
-		public IPropertyMetadata RetrieveProperty(string name)
+		public bool TryRetrieveProperty(string propertyName, out IPropertyMetadata property)
 		{
-			if (!_properties.TryGetValue(name, out var meta))
-				throw new GssMemberNotFoundException(name, $"Property not found in class '{Name}'.");
-
-			return meta;
+			return _properties.TryGetValue(propertyName, out property!);
 		}
 	}
 }
