@@ -20,7 +20,13 @@ namespace GSS.Sharp.Binding
 		public static Conversion Classify(TypeSymbol from, TypeSymbol to)
 		{
 			if (from == to) return Identity;
+
+			if (to == TypeSymbol.String) return Implicit;
+
+			if (to == TypeSymbol.Any || from == TypeSymbol.Any) return Implicit;
+
 			if (from == TypeSymbol.Int && to == TypeSymbol.Float) return Implicit;
+
 			return None;
 		}
 	}

@@ -5,13 +5,11 @@ namespace GSS.Sharp.Binding
 	public sealed class BoundScope
 	{
 		public BoundScope? Parent { get; }
-		public int VariableOffset { get; }
 		private readonly Dictionary<string, VariableSymbol> _variables = new();
 
-		public BoundScope(BoundScope? parent, int variableOffset)
+		public BoundScope(BoundScope? parent)
 		{
 			Parent = parent;
-			VariableOffset = variableOffset;
 		}
 
 		public bool TryDeclare(VariableSymbol variable)
@@ -33,11 +31,6 @@ namespace GSS.Sharp.Binding
 
 			variable = null!;
 			return false;
-		}
-
-		public int GetAllocatedVariableCount()
-		{
-			return VariableOffset + _variables.Count;
 		}
 	}
 }

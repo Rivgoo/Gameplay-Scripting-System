@@ -2,7 +2,7 @@
 
 namespace GSS.Core.Compiler.Emission
 {
-	[StructLayout(LayoutKind.Sequential, Pack = 4)]
+	[StructLayout(LayoutKind.Sequential, Pack = 4, Size = 16)]
 	public readonly struct Instruction
 	{
 		public readonly OpCode Code;

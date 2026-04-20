@@ -23,7 +23,6 @@ namespace GSS.Sharp.Binding.Nodes.Expressions
 			new(SyntaxKind.BangToken, BoundUnaryOperatorKind.LogicalNegation, TypeSymbol.Bool, TypeSymbol.Bool),
 			new(SyntaxKind.PlusToken, BoundUnaryOperatorKind.Identity, TypeSymbol.Int, TypeSymbol.Int),
 			new(SyntaxKind.MinusToken, BoundUnaryOperatorKind.Negation, TypeSymbol.Int, TypeSymbol.Int),
-			new(SyntaxKind.MinusMinusToken, BoundUnaryOperatorKind.BitwiseNegation, TypeSymbol.Int, TypeSymbol.Int),
 			new(SyntaxKind.PlusToken, BoundUnaryOperatorKind.Identity, TypeSymbol.Float, TypeSymbol.Float),
 			new(SyntaxKind.MinusToken, BoundUnaryOperatorKind.Negation, TypeSymbol.Float, TypeSymbol.Float)
 		};
@@ -64,10 +63,12 @@ namespace GSS.Sharp.Binding.Nodes.Expressions
 
 		private static readonly BoundBinaryOperator[] _operators =
 		{
+			// Int Operations
 			new(SyntaxKind.PlusToken, BoundBinaryOperatorKind.Addition, TypeSymbol.Int),
 			new(SyntaxKind.MinusToken, BoundBinaryOperatorKind.Subtraction, TypeSymbol.Int),
 			new(SyntaxKind.StarToken, BoundBinaryOperatorKind.Multiplication, TypeSymbol.Int),
 			new(SyntaxKind.SlashToken, BoundBinaryOperatorKind.Division, TypeSymbol.Int),
+			new(SyntaxKind.PercentToken, BoundBinaryOperatorKind.Modulo, TypeSymbol.Int), // Modulo
 			new(SyntaxKind.EqualsEqualsToken, BoundBinaryOperatorKind.Equals, TypeSymbol.Int, TypeSymbol.Bool),
 			new(SyntaxKind.BangEqualsToken, BoundBinaryOperatorKind.NotEquals, TypeSymbol.Int, TypeSymbol.Bool),
 			new(SyntaxKind.LessToken, BoundBinaryOperatorKind.Less, TypeSymbol.Int, TypeSymbol.Bool),
@@ -75,10 +76,12 @@ namespace GSS.Sharp.Binding.Nodes.Expressions
 			new(SyntaxKind.GreaterToken, BoundBinaryOperatorKind.Greater, TypeSymbol.Int, TypeSymbol.Bool),
 			new(SyntaxKind.GreaterOrEqualsToken, BoundBinaryOperatorKind.GreaterOrEquals, TypeSymbol.Int, TypeSymbol.Bool),
 
+			// Float Operations
 			new(SyntaxKind.PlusToken, BoundBinaryOperatorKind.Addition, TypeSymbol.Float),
 			new(SyntaxKind.MinusToken, BoundBinaryOperatorKind.Subtraction, TypeSymbol.Float),
 			new(SyntaxKind.StarToken, BoundBinaryOperatorKind.Multiplication, TypeSymbol.Float),
 			new(SyntaxKind.SlashToken, BoundBinaryOperatorKind.Division, TypeSymbol.Float),
+			new(SyntaxKind.PercentToken, BoundBinaryOperatorKind.Modulo, TypeSymbol.Float), // Modulo
 			new(SyntaxKind.EqualsEqualsToken, BoundBinaryOperatorKind.Equals, TypeSymbol.Float, TypeSymbol.Bool),
 			new(SyntaxKind.BangEqualsToken, BoundBinaryOperatorKind.NotEquals, TypeSymbol.Float, TypeSymbol.Bool),
 			new(SyntaxKind.LessToken, BoundBinaryOperatorKind.Less, TypeSymbol.Float, TypeSymbol.Bool),
@@ -86,10 +89,12 @@ namespace GSS.Sharp.Binding.Nodes.Expressions
 			new(SyntaxKind.GreaterToken, BoundBinaryOperatorKind.Greater, TypeSymbol.Float, TypeSymbol.Bool),
 			new(SyntaxKind.GreaterOrEqualsToken, BoundBinaryOperatorKind.GreaterOrEquals, TypeSymbol.Float, TypeSymbol.Bool),
 
+			// String Operations
 			new(SyntaxKind.PlusToken, BoundBinaryOperatorKind.Addition, TypeSymbol.String),
 			new(SyntaxKind.EqualsEqualsToken, BoundBinaryOperatorKind.Equals, TypeSymbol.String, TypeSymbol.Bool),
 			new(SyntaxKind.BangEqualsToken, BoundBinaryOperatorKind.NotEquals, TypeSymbol.String, TypeSymbol.Bool),
 
+			// Bool Operations
 			new(SyntaxKind.AmpersandAmpersandToken, BoundBinaryOperatorKind.LogicalAnd, TypeSymbol.Bool),
 			new(SyntaxKind.PipePipeToken, BoundBinaryOperatorKind.LogicalOr, TypeSymbol.Bool),
 			new(SyntaxKind.EqualsEqualsToken, BoundBinaryOperatorKind.Equals, TypeSymbol.Bool),
@@ -98,6 +103,24 @@ namespace GSS.Sharp.Binding.Nodes.Expressions
 
 		public static BoundBinaryOperator? Bind(SyntaxKind syntaxKind, TypeSymbol leftType, TypeSymbol rightType)
 		{
+			if (syntaxKind == SyntaxKind.PlusToken)
+			{
+				if (leftType == TypeSymbol.String || rightType == TypeSymbol.String ||
+					leftType == TypeSymbol.Any || rightType == TypeSymbol.Any)
+				{
+					return new BoundBinaryOperator(SyntaxKind.PlusToken, BoundBinaryOperatorKind.Addition, leftType, rightType, TypeSymbol.String);
+				}
+			}
+
+			if (syntaxKind == SyntaxKind.EqualsEqualsToken || syntaxKind == SyntaxKind.BangEqualsToken)
+			{
+				if (leftType == TypeSymbol.Any || rightType == TypeSymbol.Any)
+				{
+					var kind = syntaxKind == SyntaxKind.EqualsEqualsToken ? BoundBinaryOperatorKind.Equals : BoundBinaryOperatorKind.NotEquals;
+					return new BoundBinaryOperator(syntaxKind, kind, leftType, rightType, TypeSymbol.Bool);
+				}
+			}
+
 			for (int i = 0; i < _operators.Length; i++)
 			{
 				if (_operators[i].SyntaxKind == syntaxKind && _operators[i].LeftType == leftType && _operators[i].RightType == rightType)

@@ -30,7 +30,9 @@
 		Sem306_InvalidOperator = 306,
 		Sem307_ImplicitVarWithoutInitializer = 307,
 		Sem308_InvalidAssignmentTarget = 308,
+		Sem309_UninitializedVariable = 309,
 		Sem310_InvalidBreakContext = 310,
-		Sem311_InvalidContinueContext = 311
+		Sem311_InvalidContinueContext = 311,
+		Sem312_FeatureNotSupported = 312
 	}
 }

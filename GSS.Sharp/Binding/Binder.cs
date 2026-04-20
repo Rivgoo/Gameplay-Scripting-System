@@ -6,6 +6,7 @@ using GSS.Sharp.Binding.Nodes.Expressions;
 using GSS.Sharp.Binding.Nodes.Statements;
 using GSS.Sharp.Binding.Symbols;
 using GSS.Sharp.Diagnostics;
+using GSS.Sharp.Emission;
 using GSS.Sharp.Syntax;
 using GSS.Sharp.Syntax.Nodes;
 using GSS.Sharp.Syntax.Nodes.Expressions;
@@ -20,7 +21,7 @@ namespace GSS.Sharp.Binding
 		private readonly DiagnosticBag _diagnostics;
 		private readonly IClassMetadata _apiContext;
 		private BoundScope _scope;
-		private int _maxAllocatedVariables;
+		public readonly RegisterAllocator Allocator;
 
 		private readonly Stack<(BoundLabel BreakLabel, BoundLabel ContinueLabel)> _loopStack = new();
 		private int _labelCounter;
@@ -30,28 +31,22 @@ namespace GSS.Sharp.Binding
 			_source = source;
 			_diagnostics = diagnostics;
 			_apiContext = apiContext;
-			_scope = new BoundScope(null, 0);
+			_scope = new BoundScope(null);
+			Allocator = new RegisterAllocator();
 		}
 
-		public int GetAllocatedVariableCount() => _maxAllocatedVariables;
-
 		private BoundLabel GenerateLabel(string prefix) => new($"{prefix}_{++_labelCounter}");
-
 		private TextLocation GetLocation(TextSpan span) => new(_source, span);
 
 		public BoundBlockStatement BindBlockStatement(BlockStatementSyntax syntax)
 		{
 			var statements = new List<BoundStatement>();
-			int currentOffset = _scope.GetAllocatedVariableCount();
-			_scope = new BoundScope(_scope, currentOffset);
+			_scope = new BoundScope(_scope);
 
 			for (int i = 0; i < syntax.Statements.Count; i++)
 			{
 				statements.Add(BindStatement(syntax.Statements[i]));
 			}
-
-			int allocatedInScope = _scope.GetAllocatedVariableCount();
-			if (allocatedInScope > _maxAllocatedVariables) _maxAllocatedVariables = allocatedInScope;
 
 			_scope = _scope.Parent!;
 			return new BoundBlockStatement(statements);
@@ -67,16 +62,18 @@ namespace GSS.Sharp.Binding
 			SyntaxKind.IfStatement => BindIfStatement((IfStatementSyntax)syntax),
 			SyntaxKind.WhileStatement => BindWhileStatement((WhileStatementSyntax)syntax),
 			SyntaxKind.ForStatement => BindForStatement((ForStatementSyntax)syntax),
+			SyntaxKind.ForEachStatement => BindForEachStatement((ForEachStatementSyntax)syntax),
 			SyntaxKind.BreakStatement => BindBreakStatement((BreakStatementSyntax)syntax),
 			SyntaxKind.ContinueStatement => BindContinueStatement((ContinueStatementSyntax)syntax),
 			SyntaxKind.ReturnStatement => BindReturnStatement((ReturnStatementSyntax)syntax),
-			_ => throw new Exception($"Unexpected syntax {syntax.Kind}")
+			SyntaxKind.ImportDirective => new BoundBlockStatement(new List<BoundStatement>()), // Ігноруємо під час виконання
+			_ => ReportUnsupportedStatement(syntax)
 		};
 
-		private BoundStatement BindWaitStatement(WaitStatementSyntax syntax)
+		private BoundStatement ReportUnsupportedStatement(StatementSyntax syntax)
 		{
-			var duration = BindExpression(syntax.Duration, TypeSymbol.Float);
-			return new BoundWaitStatement(duration);
+			_diagnostics.Report(SemanticDiagnosticRules.FeatureNotSupported, GetLocation(syntax.Span), syntax.Kind.ToString());
+			return new BoundBlockStatement(new List<BoundStatement>());
 		}
 
 		private BoundStatement BindExpressionStatement(ExpressionStatementSyntax syntax)
@@ -84,13 +81,39 @@ namespace GSS.Sharp.Binding
 			return new BoundExpressionStatement(BindExpression(syntax.Expression));
 		}
 
+		private BoundStatement BindWaitStatement(WaitStatementSyntax syntax)
+		{
+			var duration = BindExpression(syntax.Duration, TypeSymbol.Float);
+			return new BoundWaitStatement(duration);
+		}
+
+		private BoundStatement BindBreakStatement(BreakStatementSyntax syntax)
+		{
+			if (_loopStack.Count == 0)
+			{
+				_diagnostics.Report(SemanticDiagnosticRules.InvalidBreakContext, GetLocation(syntax.Span));
+				return new BoundBlockStatement(new List<BoundStatement>());
+			}
+			return new BoundGotoStatement(_loopStack.Peek().BreakLabel);
+		}
+
+		private BoundStatement BindContinueStatement(ContinueStatementSyntax syntax)
+		{
+			if (_loopStack.Count == 0)
+			{
+				_diagnostics.Report(SemanticDiagnosticRules.InvalidContinueContext, GetLocation(syntax.Span));
+				return new BoundBlockStatement(new List<BoundStatement>());
+			}
+			return new BoundGotoStatement(_loopStack.Peek().ContinueLabel);
+		}
+
 		private BoundStatement BindVariableDeclaration(VariableDeclarationSyntax syntax)
 		{
 			var type = ResolveType(syntax.Type);
 			var initializer = BindExpression(syntax.Initializer, type);
 
-			int registerIndex = _scope.GetAllocatedVariableCount();
-			var variable = new VariableSymbol(syntax.IdentifierToken.Text, type, registerIndex, false);
+			int registerIndex = Allocator.Allocate();
+			var variable = new VariableSymbol(syntax.IdentifierToken.Text, type, registerIndex, false, true);
 
 			if (!_scope.TryDeclare(variable))
 				_diagnostics.Report(SemanticDiagnosticRules.VariableAlreadyDeclared, syntax.IdentifierToken.Location, syntax.IdentifierToken.Text);
@@ -102,14 +125,8 @@ namespace GSS.Sharp.Binding
 		{
 			var initializer = BindExpression(syntax.Initializer);
 
-			if (initializer.Type == TypeSymbol.Error || initializer.Type == TypeSymbol.Void)
-			{
-				_diagnostics.Report(SemanticDiagnosticRules.ImplicitVarWithoutInitializer, syntax.VarKeyword.Location);
-				return new BoundVariableDeclaration(new VariableSymbol("?", TypeSymbol.Error, 0, false), initializer);
-			}
-
-			int registerIndex = _scope.GetAllocatedVariableCount();
-			var variable = new VariableSymbol(syntax.IdentifierToken.Text, initializer.Type, registerIndex, false);
+			int registerIndex = Allocator.Allocate();
+			var variable = new VariableSymbol(syntax.IdentifierToken.Text, initializer.Type, registerIndex, false, true);
 
 			if (!_scope.TryDeclare(variable))
 				_diagnostics.Report(SemanticDiagnosticRules.VariableAlreadyDeclared, syntax.IdentifierToken.Location, syntax.IdentifierToken.Text);
@@ -141,8 +158,7 @@ namespace GSS.Sharp.Binding
 		private BoundStatement BindForStatement(ForStatementSyntax syntax)
 		{
 			var statements = new List<BoundStatement>();
-			int currentOffset = _scope.GetAllocatedVariableCount();
-			_scope = new BoundScope(_scope, currentOffset);
+			_scope = new BoundScope(_scope);
 
 			if (syntax.Initializer != null) statements.Add(BindStatement(syntax.Initializer));
 
@@ -163,41 +179,66 @@ namespace GSS.Sharp.Binding
 			{
 				bodyBlockStatements.Add(new BoundLabelStatement(continueLabel));
 				bodyBlockStatements.Add(new BoundExpressionStatement(BindExpression(syntax.Increment)));
-				var explicitContinueForWhile = GenerateLabel("loop_eval");
-				bodyBlockStatements.Add(new BoundGotoStatement(explicitContinueForWhile));
+				var loopEval = GenerateLabel("loop_eval");
+				bodyBlockStatements.Add(new BoundGotoStatement(loopEval));
 
-				statements.Add(new BoundWhileStatement(condition, new BoundBlockStatement(bodyBlockStatements), breakLabel, explicitContinueForWhile));
+				statements.Add(new BoundWhileStatement(condition, new BoundBlockStatement(bodyBlockStatements), breakLabel, loopEval));
 			}
 			else
 			{
 				statements.Add(new BoundWhileStatement(condition, new BoundBlockStatement(bodyBlockStatements), breakLabel, continueLabel));
 			}
 
-			int allocatedInScope = _scope.GetAllocatedVariableCount();
-			if (allocatedInScope > _maxAllocatedVariables) _maxAllocatedVariables = allocatedInScope;
-
 			_scope = _scope.Parent!;
 			return new BoundBlockStatement(statements);
 		}
 
-		private BoundStatement BindBreakStatement(BreakStatementSyntax syntax)
+		private BoundStatement BindForEachStatement(ForEachStatementSyntax syntax)
 		{
-			if (_loopStack.Count == 0)
+			if (syntax.CollectionExpression is RangeExpressionSyntax range)
 			{
-				_diagnostics.Report(SemanticDiagnosticRules.InvalidBreakContext, syntax.BreakKeyword.Location);
-				return new BoundExpressionStatement(new BoundLiteralExpression(0, TypeSymbol.Error));
-			}
-			return new BoundGotoStatement(_loopStack.Peek().BreakLabel);
-		}
+				var startExpr = BindExpression(range.StartExpression, TypeSymbol.Int);
+				var endExpr = BindExpression(range.EndExpression, TypeSymbol.Int);
 
-		private BoundStatement BindContinueStatement(ContinueStatementSyntax syntax)
-		{
-			if (_loopStack.Count == 0)
-			{
-				_diagnostics.Report(SemanticDiagnosticRules.InvalidContinueContext, syntax.ContinueKeyword.Location);
-				return new BoundExpressionStatement(new BoundLiteralExpression(0, TypeSymbol.Error));
+				_scope = new BoundScope(_scope);
+				int reg = Allocator.Allocate();
+				var variable = new VariableSymbol(syntax.IdentifierToken.Text, TypeSymbol.Int, reg, false, true);
+				_scope.TryDeclare(variable);
+
+				var init = new BoundVariableDeclaration(variable, startExpr);
+				var condition = new BoundBinaryExpression(
+					new BoundVariableExpression(variable),
+					BoundBinaryOperator.Bind(SyntaxKind.LessToken, TypeSymbol.Int, TypeSymbol.Int)!,
+					endExpr);
+
+				var breakLabel = GenerateLabel("break");
+				var continueLabel = GenerateLabel("continue");
+
+				_loopStack.Push((breakLabel, continueLabel));
+				var body = BindStatement(syntax.Body);
+				_loopStack.Pop();
+
+				var increment = new BoundExpressionStatement(new BoundAssignmentExpression(variable,
+					new BoundBinaryExpression(
+						new BoundVariableExpression(variable),
+						BoundBinaryOperator.Bind(SyntaxKind.PlusToken, TypeSymbol.Int, TypeSymbol.Int)!,
+						new BoundLiteralExpression(1, TypeSymbol.Int)
+					)
+				));
+
+				var bodyBlockStatements = new List<BoundStatement> { body, new BoundLabelStatement(continueLabel), increment };
+				var loopEval = GenerateLabel("loop_eval");
+				bodyBlockStatements.Add(new BoundGotoStatement(loopEval));
+
+				var whileLoop = new BoundWhileStatement(condition, new BoundBlockStatement(bodyBlockStatements), breakLabel, loopEval);
+				var block = new BoundBlockStatement(new List<BoundStatement> { init, whileLoop });
+
+				_scope = _scope.Parent!;
+				return block;
 			}
-			return new BoundGotoStatement(_loopStack.Peek().ContinueLabel);
+
+			_diagnostics.Report(SemanticDiagnosticRules.FeatureNotSupported, GetLocation(syntax.CollectionExpression.Span), "ForEach over Objects");
+			return new BoundBlockStatement(new List<BoundStatement>());
 		}
 
 		private BoundStatement BindReturnStatement(ReturnStatementSyntax syntax)
@@ -226,31 +267,59 @@ namespace GSS.Sharp.Binding
 		{
 			SyntaxKind.LiteralExpression => BindLiteralExpression((LiteralExpressionSyntax)syntax),
 			SyntaxKind.IdentifierExpression => BindIdentifierExpression((IdentifierExpressionSyntax)syntax),
-			SyntaxKind.ElementAccessExpression => BindElementAccessExpression((ElementAccessExpressionSyntax)syntax),
 			SyntaxKind.AssignmentExpression => BindAssignmentExpression((AssignmentExpressionSyntax)syntax),
+			SyntaxKind.ElementAccessExpression => BindElementAccessExpression((ElementAccessExpressionSyntax)syntax),
 			SyntaxKind.UnaryExpression => BindUnaryExpression((UnaryExpressionSyntax)syntax),
+			SyntaxKind.PostfixUnaryExpression => BindPostfixUnaryExpression((PostfixUnaryExpressionSyntax)syntax),
 			SyntaxKind.BinaryExpression => BindBinaryExpression((BinaryExpressionSyntax)syntax),
 			SyntaxKind.CallExpression => BindCallExpression((CallExpressionSyntax)syntax),
-			_ => throw new Exception($"Unexpected expression syntax {syntax.Kind}")
+			SyntaxKind.TernaryExpression => BindTernaryExpression((TernaryExpressionSyntax)syntax),
+
+			SyntaxKind.MemberAccessExpression => ReportUnsupportedExpression(syntax, "Deep Member Access (obj.Prop)"),
+			SyntaxKind.NullCoalescingExpression => ReportUnsupportedExpression(syntax, "Null Coalescing (??)"),
+			SyntaxKind.RangeExpression => ReportUnsupportedExpression(syntax, "Standalone Range (..)"),
+			SyntaxKind.NullConditionalAccessExpression => ReportUnsupportedExpression(syntax, "Null Conditional (?.)"),
+			_ => ReportUnsupportedExpression(syntax, syntax.Kind.ToString())
 		};
+
+		private BoundExpression ReportUnsupportedExpression(ExpressionSyntax syntax, string feature)
+		{
+			_diagnostics.Report(SemanticDiagnosticRules.FeatureNotSupported, GetLocation(syntax.Span), feature);
+			return new BoundLiteralExpression(0, TypeSymbol.Error);
+		}
 
 		private BoundExpression BindLiteralExpression(LiteralExpressionSyntax syntax)
 		{
-			var value = syntax.LiteralToken.Value ?? 0;
-			var type = syntax.LiteralToken.Kind switch
+			var kind = syntax.LiteralToken.Kind;
+			object? value = syntax.LiteralToken.Value;
+
+			if (kind == SyntaxKind.TrueKeyword) value = true;
+			else if (kind == SyntaxKind.FalseKeyword) value = false;
+			else if (kind == SyntaxKind.NullKeyword) value = null;
+			else value ??= 0;
+
+			var type = kind switch
 			{
 				SyntaxKind.NumberToken => value is float ? TypeSymbol.Float : TypeSymbol.Int,
 				SyntaxKind.StringToken => TypeSymbol.String,
 				SyntaxKind.TrueKeyword or SyntaxKind.FalseKeyword => TypeSymbol.Bool,
 				_ => TypeSymbol.Error
 			};
+
 			return new BoundLiteralExpression(value, type);
 		}
 
 		private BoundExpression BindIdentifierExpression(IdentifierExpressionSyntax syntax)
 		{
 			var name = syntax.IdentifierToken.Text;
-			if (_scope.TryLookup(name, out var variable)) return new BoundVariableExpression(variable);
+			if (_scope.TryLookup(name, out var variable))
+			{
+				if (!variable.IsAssigned)
+				{
+					_diagnostics.Report(SemanticDiagnosticRules.UninitializedVariable, syntax.IdentifierToken.Location, name);
+				}
+				return new BoundVariableExpression(variable);
+			}
 
 			if (_apiContext.TryRetrieveProperty(name, out var prop))
 			{
@@ -279,6 +348,8 @@ namespace GSS.Sharp.Binding
 				{
 					if (variable.IsReadOnly)
 						_diagnostics.Report(SemanticDiagnosticRules.CannotAssignReadOnly, GetLocation(syntax.Left.Span), name);
+
+					variable.IsAssigned = true;
 					return new BoundAssignmentExpression(variable, BindExpression(syntax.Right, variable.Type));
 				}
 
@@ -290,8 +361,6 @@ namespace GSS.Sharp.Binding
 					var propType = ParseApiType(prop.Type);
 					return new BoundApiAssignmentExpression(prop, BindExpression(syntax.Right, propType));
 				}
-
-				_diagnostics.Report(SemanticDiagnosticRules.UndefinedVariable, GetLocation(syntax.Left.Span), name);
 			}
 			else if (syntax.Left is ElementAccessExpressionSyntax elementAccess)
 			{
@@ -299,16 +368,17 @@ namespace GSS.Sharp.Binding
 				var index = BindExpression(elementAccess.IndexArgument, TypeSymbol.Int);
 				return new BoundIndexAssignmentExpression(collection, index, boundRight);
 			}
-			else
-			{
-				_diagnostics.Report(SemanticDiagnosticRules.InvalidAssignmentTarget, GetLocation(syntax.Left.Span), "assignment");
-			}
 
 			return boundRight;
 		}
 
 		private BoundExpression BindUnaryExpression(UnaryExpressionSyntax syntax)
 		{
+			if (syntax.OperatorToken.Kind == SyntaxKind.PlusPlusToken || syntax.OperatorToken.Kind == SyntaxKind.MinusMinusToken)
+			{
+				return HandleIncrementDecrement(syntax.Operand, syntax.OperatorToken);
+			}
+
 			var operand = BindExpression(syntax.Operand);
 			var op = BoundUnaryOperator.Bind(syntax.OperatorToken.Kind, operand.Type);
 			if (op == null)
@@ -317,6 +387,42 @@ namespace GSS.Sharp.Binding
 				return operand;
 			}
 			return new BoundUnaryExpression(op, operand);
+		}
+
+		private BoundExpression BindPostfixUnaryExpression(PostfixUnaryExpressionSyntax syntax)
+		{
+			return HandleIncrementDecrement(syntax.Operand, syntax.OperatorToken);
+		}
+
+		private BoundExpression HandleIncrementDecrement(ExpressionSyntax operandSyntax, SyntaxToken operatorToken)
+		{
+			var operand = BindExpression(operandSyntax);
+
+			if (operandSyntax is IdentifierExpressionSyntax id)
+			{
+				var name = id.IdentifierToken.Text;
+				if (_scope.TryLookup(name, out var variable))
+				{
+					if (variable.IsReadOnly)
+						_diagnostics.Report(SemanticDiagnosticRules.CannotAssignReadOnly, GetLocation(operandSyntax.Span), name);
+
+					var one = new BoundLiteralExpression(1, variable.Type == TypeSymbol.Float ? TypeSymbol.Float : TypeSymbol.Int);
+					var tokenKind = operatorToken.Kind == SyntaxKind.PlusPlusToken ? SyntaxKind.PlusToken : SyntaxKind.MinusToken;
+					var op = BoundBinaryOperator.Bind(tokenKind, variable.Type, one.Type);
+
+					if (op == null)
+					{
+						_diagnostics.Report(SemanticDiagnosticRules.InvalidOperator, operatorToken.Location, operatorToken.Text, variable.Type.Name);
+						return operand;
+					}
+
+					var binary = new BoundBinaryExpression(operand, op, one);
+					return new BoundAssignmentExpression(variable, binary);
+				}
+			}
+
+			_diagnostics.Report(SemanticDiagnosticRules.InvalidAssignmentTarget, operatorToken.Location, operatorToken.Text);
+			return operand;
 		}
 
 		private BoundExpression BindBinaryExpression(BinaryExpressionSyntax syntax)
@@ -328,30 +434,18 @@ namespace GSS.Sharp.Binding
 			var op = BoundBinaryOperator.Bind(syntax.OperatorToken.Kind, left.Type, right.Type);
 			if (op == null)
 			{
-				if (left.Type == TypeSymbol.String || right.Type == TypeSymbol.String)
-				{
-					if (left.Type != TypeSymbol.String) left = new BoundConversionExpression(TypeSymbol.String, left);
-					if (right.Type != TypeSymbol.String) right = new BoundConversionExpression(TypeSymbol.String, right);
-					op = BoundBinaryOperator.Bind(syntax.OperatorToken.Kind, TypeSymbol.String, TypeSymbol.String);
-				}
-				else if (left.Type == TypeSymbol.Int && right.Type == TypeSymbol.Float)
-				{
-					left = new BoundConversionExpression(TypeSymbol.Float, left);
-					op = BoundBinaryOperator.Bind(syntax.OperatorToken.Kind, TypeSymbol.Float, TypeSymbol.Float);
-				}
-				else if (left.Type == TypeSymbol.Float && right.Type == TypeSymbol.Int)
-				{
-					right = new BoundConversionExpression(TypeSymbol.Float, right);
-					op = BoundBinaryOperator.Bind(syntax.OperatorToken.Kind, TypeSymbol.Float, TypeSymbol.Float);
-				}
-
-				if (op == null)
-				{
-					_diagnostics.Report(SemanticDiagnosticRules.InvalidOperator, syntax.OperatorToken.Location, syntax.OperatorToken.Text, left.Type.Name + " and " + right.Type.Name);
-					return left;
-				}
+				_diagnostics.Report(SemanticDiagnosticRules.InvalidOperator, syntax.OperatorToken.Location, syntax.OperatorToken.Text, left.Type.Name + " and " + right.Type.Name);
+				return left;
 			}
 			return new BoundBinaryExpression(left, op, right);
+		}
+
+		private BoundExpression BindTernaryExpression(TernaryExpressionSyntax syntax)
+		{
+			var condition = BindExpression(syntax.Condition, TypeSymbol.Bool);
+			var trueExpr = BindExpression(syntax.TrueExpression);
+			var falseExpr = BindExpression(syntax.FalseExpression, trueExpr.Type);
+			return new BoundTernaryExpression(condition, trueExpr, falseExpr);
 		}
 
 		private BoundExpression BindCallExpression(CallExpressionSyntax syntax)
@@ -390,7 +484,6 @@ namespace GSS.Sharp.Binding
 					"float" => TypeSymbol.Float,
 					"bool" => TypeSymbol.Bool,
 					"string" => TypeSymbol.String,
-					"Vector3" => TypeSymbol.Vector3,
 					_ => TypeSymbol.Error
 				};
 			}

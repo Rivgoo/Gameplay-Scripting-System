@@ -124,4 +124,20 @@ namespace GSS.Sharp.Binding.Nodes.Expressions
 			Expression = expression;
 		}
 	}
+
+	public sealed class BoundTernaryExpression : BoundExpression
+	{
+		public BoundExpression Condition { get; }
+		public BoundExpression TrueExpression { get; }
+		public BoundExpression FalseExpression { get; }
+		public override TypeSymbol Type => TrueExpression.Type;
+		public override BoundNodeKind Kind => BoundNodeKind.TernaryExpression;
+
+		public BoundTernaryExpression(BoundExpression condition, BoundExpression trueExpression, BoundExpression falseExpression)
+		{
+			Condition = condition;
+			TrueExpression = trueExpression;
+			FalseExpression = falseExpression;
+		}
+	}
 }

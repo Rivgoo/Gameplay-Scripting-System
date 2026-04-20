@@ -40,6 +40,10 @@ namespace GSS.Sharp.Diagnostics
 			DiagnosticCode.Sem308_InvalidAssignmentTarget, DiagnosticSeverity.Error,
 			"The left-hand side of an assignment must be a variable, property, or indexer. Invalid target for {0}.", "Verify that you are assigning to a valid location.");
 
+		public static readonly DiagnosticDescriptor UninitializedVariable = new(
+			(DiagnosticCode)309, DiagnosticSeverity.Error,
+			"Use of unassigned local variable '{0}'.", "Ensure the variable is initialized before accessing it.");
+
 		public static readonly DiagnosticDescriptor InvalidBreakContext = new(
 			DiagnosticCode.Sem310_InvalidBreakContext, DiagnosticSeverity.Error,
 			"No enclosing loop out of which to break.", "Ensure 'break' is used inside a loop (while/for).");
@@ -47,5 +51,9 @@ namespace GSS.Sharp.Diagnostics
 		public static readonly DiagnosticDescriptor InvalidContinueContext = new(
 			DiagnosticCode.Sem311_InvalidContinueContext, DiagnosticSeverity.Error,
 			"No enclosing loop out of which to continue.", "Ensure 'continue' is used inside a loop (while/for).");
+
+		public static readonly DiagnosticDescriptor FeatureNotSupported = new(
+			(DiagnosticCode)312, DiagnosticSeverity.Error,
+			"Feature '{0}' is not yet supported by the GSS compiler.", "Avoid using this feature for now.");
 	}
 }

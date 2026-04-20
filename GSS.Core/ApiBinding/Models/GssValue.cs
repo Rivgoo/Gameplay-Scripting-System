@@ -3,22 +3,22 @@ using GSS.Core.ApiBinding.Exceptions;
 
 namespace GSS.Core.ApiBinding.Models
 {
-	[StructLayout(LayoutKind.Explicit)]
+	[StructLayout(LayoutKind.Explicit, Size = 24)]
 	public struct GssValue
 	{
 		[FieldOffset(0)] public GssType Type;
 
-		[FieldOffset(8)] public int AsInt;
-		[FieldOffset(8)] public float AsFloat;
-		[FieldOffset(8)] public bool AsBool;
-		[FieldOffset(8)] public long AsLong;
-		[FieldOffset(8)] public double AsDouble;
+		[FieldOffset(4)] public int AsInt;
+		[FieldOffset(4)] public float AsFloat;
+		[FieldOffset(4)] public bool AsBool;
+		[FieldOffset(4)] public long AsLong;
+		[FieldOffset(4)] public double AsDouble;
 
-		[FieldOffset(8)] public float X;
-		[FieldOffset(12)] public float Y;
-		[FieldOffset(16)] public float Z;
+		[FieldOffset(4)] public float X;
+		[FieldOffset(8)] public float Y;
+		[FieldOffset(12)] public float Z;
 
-		[FieldOffset(24)] public object? AsObject;
+		[FieldOffset(16)] public object? AsObject;
 
 		public static GssValue Null => new() { Type = GssType.Null };
 		public static GssValue FromInt(int v) => new() { Type = GssType.Int, AsInt = v };
@@ -27,6 +27,8 @@ namespace GSS.Core.ApiBinding.Models
 		public static GssValue FromDouble(double v) => new() { Type = GssType.Double, AsDouble = v };
 		public static GssValue FromLong(long v) => new() { Type = GssType.Long, AsLong = v };
 		public static GssValue FromObject(object? v) => new() { Type = GssType.Object, AsObject = v };
+
+		public static GssValue FromVector3(float x, float y, float z) => new() { Type = GssType.Object, X = x, Y = y, Z = z };
 
 		public readonly T Unbox<T>()
 		{
@@ -67,7 +69,7 @@ namespace GSS.Core.ApiBinding.Models
 				GssType.Long => AsLong,
 				GssType.Double => AsDouble,
 				GssType.Object => AsObject,
-				_ => AsObject
+				_ => null
 			};
 		}
 	}

@@ -1,4 +1,5 @@
 ﻿using System.Globalization;
+using System.Text;
 using GSS.Core.Compiler.Diagnostics;
 using GSS.Core.Compiler.Text;
 using GSS.Sharp.Syntax;
@@ -8,14 +9,14 @@ namespace GSS.Sharp.Parsing
 	public sealed class Lexer
 	{
 		public DiagnosticBag Diagnostics { get; } = new();
-		private readonly ISourceText _source;
+		private readonly SourceText _source;
 		private int _position;
 		private readonly Stack<LexerMode> _modeStack = new();
 		private int _interpolationBraceDepth;
 
 		public Lexer(ISourceText source)
 		{
-			_source = source;
+			_source = (SourceText)source;
 			_modeStack.Push(LexerMode.Default);
 		}
 
@@ -61,7 +62,7 @@ namespace GSS.Sharp.Parsing
 				if (char.IsWhiteSpace(current))
 				{
 					while (char.IsWhiteSpace(Current())) _position++;
-					trivia.Add(new SyntaxTrivia(SyntaxKind.WhitespaceToken, new TextSpan(start, _position - start), _source.RawText.Substring(start, _position - start)));
+					trivia.Add(new SyntaxTrivia(SyntaxKind.WhitespaceToken, new TextSpan(start, _position - start)));
 					if (isTrailing && (current == '\n' || current == '\r')) break;
 				}
 				else if (current == '/' && (Lookahead() == '/' || Lookahead() == '*'))
@@ -78,7 +79,7 @@ namespace GSS.Sharp.Parsing
 						if (Current() == '\0') Diagnostics.Report(DiagnosticRules.LexUnterminatedComment, CreateLocation(start, _position - start));
 						else _position += 2;
 					}
-					trivia.Add(new SyntaxTrivia(SyntaxKind.CommentToken, new TextSpan(start, _position - start), _source.RawText.Substring(start, _position - start)));
+					trivia.Add(new SyntaxTrivia(SyntaxKind.CommentToken, new TextSpan(start, _position - start)));
 				}
 				else break;
 			}
@@ -102,7 +103,8 @@ namespace GSS.Sharp.Parsing
 			int start = _position;
 			while (char.IsLetterOrDigit(Current()) || Current() == '_') _position++;
 			int length = _position - start;
-			ReadOnlySpan<char> textSpan = _source.RawText.AsSpan(start, length);
+
+			ReadOnlySpan<char> textSpan = _source.GetSpan(new StringSegment(start, length));
 			return new SyntaxToken(SyntaxFacts.GetKeywordKind(textSpan), start, length, _source);
 		}
 
@@ -118,7 +120,7 @@ namespace GSS.Sharp.Parsing
 			}
 
 			int length = _position - start;
-			ReadOnlySpan<char> textSpan = _source.RawText.AsSpan(start, length);
+			ReadOnlySpan<char> textSpan = _source.GetSpan(new StringSegment(start, length));
 			object value = 0;
 
 			if (hasDot)
@@ -142,6 +144,7 @@ namespace GSS.Sharp.Parsing
 		private SyntaxToken ReadString()
 		{
 			int start = _position++;
+			var sb = new StringBuilder();
 			bool done = false;
 
 			while (!done)
@@ -161,16 +164,26 @@ namespace GSS.Sharp.Parsing
 					case '\\':
 						_position++;
 						char esc = Current();
-						if (esc != 'n' && esc != 'r' && esc != 't' && esc != '\\' && esc != '"' && esc != '\0')
+						if (esc == 'n') sb.Append('\n');
+						else if (esc == 'r') sb.Append('\r');
+						else if (esc == 't') sb.Append('\t');
+						else if (esc == '\\') sb.Append('\\');
+						else if (esc == '"') sb.Append('"');
+						else if (esc != '\0')
+						{
 							Diagnostics.Report(DiagnosticRules.LexInvalidEscape, CreateLocation(_position - 1, 2), esc);
+							sb.Append(esc);
+						}
 						if (esc != '\0') _position++;
 						break;
 					default:
+						sb.Append(Current());
 						_position++;
 						break;
 				}
 			}
-			return new SyntaxToken(SyntaxKind.StringToken, start, _position - start, _source);
+
+			return new SyntaxToken(SyntaxKind.StringToken, start, _position - start, _source, sb.ToString());
 		}
 
 		private SyntaxToken ReadInterpolatedStringStart()
@@ -225,14 +238,8 @@ namespace GSS.Sharp.Parsing
 
 			switch (current)
 			{
-				case '+':
-					if (lookahead == '=') { _position++; return new SyntaxToken(SyntaxKind.PlusEqualsToken, start, 2, _source); }
-					if (lookahead == '+') { _position++; return new SyntaxToken(SyntaxKind.PlusPlusToken, start, 2, _source); }
-					return new SyntaxToken(SyntaxKind.PlusToken, start, 1, _source);
-				case '-':
-					if (lookahead == '=') { _position++; return new SyntaxToken(SyntaxKind.MinusEqualsToken, start, 2, _source); }
-					if (lookahead == '-') { _position++; return new SyntaxToken(SyntaxKind.MinusMinusToken, start, 2, _source); }
-					return new SyntaxToken(SyntaxKind.MinusToken, start, 1, _source);
+				case '+': if (lookahead == '=') { _position++; return new SyntaxToken(SyntaxKind.PlusEqualsToken, start, 2, _source); } if (lookahead == '+') { _position++; return new SyntaxToken(SyntaxKind.PlusPlusToken, start, 2, _source); } return new SyntaxToken(SyntaxKind.PlusToken, start, 1, _source);
+				case '-': if (lookahead == '=') { _position++; return new SyntaxToken(SyntaxKind.MinusEqualsToken, start, 2, _source); } if (lookahead == '-') { _position++; return new SyntaxToken(SyntaxKind.MinusMinusToken, start, 2, _source); } return new SyntaxToken(SyntaxKind.MinusToken, start, 1, _source);
 				case '*': if (lookahead == '=') { _position++; return new SyntaxToken(SyntaxKind.StarEqualsToken, start, 2, _source); } return new SyntaxToken(SyntaxKind.StarToken, start, 1, _source);
 				case '/': if (lookahead == '=') { _position++; return new SyntaxToken(SyntaxKind.SlashEqualsToken, start, 2, _source); } return new SyntaxToken(SyntaxKind.SlashToken, start, 1, _source);
 				case '%': return new SyntaxToken(SyntaxKind.PercentToken, start, 1, _source);
@@ -244,11 +251,7 @@ namespace GSS.Sharp.Parsing
 					if (_modeStack.Peek() == LexerMode.InterpolationExpression) _interpolationBraceDepth++;
 					return new SyntaxToken(SyntaxKind.OpenBraceToken, start, 1, _source);
 				case '}':
-					if (_modeStack.Peek() == LexerMode.InterpolationExpression)
-					{
-						_interpolationBraceDepth--;
-						if (_interpolationBraceDepth == 0) _modeStack.Pop();
-					}
+					if (_modeStack.Peek() == LexerMode.InterpolationExpression) { _interpolationBraceDepth--; if (_interpolationBraceDepth == 0) _modeStack.Pop(); }
 					return new SyntaxToken(SyntaxKind.CloseBraceToken, start, 1, _source);
 				case ',': return new SyntaxToken(SyntaxKind.CommaToken, start, 1, _source);
 				case ';': return new SyntaxToken(SyntaxKind.SemicolonToken, start, 1, _source);

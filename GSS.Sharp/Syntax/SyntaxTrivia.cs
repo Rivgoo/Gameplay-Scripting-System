@@ -6,13 +6,11 @@ namespace GSS.Sharp.Syntax
 	{
 		public SyntaxKind Kind { get; }
 		public TextSpan Span { get; }
-		public string Text { get; }
 
-		public SyntaxTrivia(SyntaxKind kind, TextSpan span, string text)
+		public SyntaxTrivia(SyntaxKind kind, TextSpan span)
 		{
 			Kind = kind;
 			Span = span;
-			Text = text;
 		}
 	}
 }

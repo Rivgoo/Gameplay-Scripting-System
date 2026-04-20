@@ -16,6 +16,9 @@ namespace GSS.Core.Runtime.Memory
 
 		private GssValue[] _registers = Array.Empty<GssValue>();
 		private GssValue[] _argBuffer = Array.Empty<GssValue>();
+		private CallFrame[] _callStack = Array.Empty<CallFrame>();
+		private int _callStackCount;
+		private int _currentBaseRegisterIndex;
 
 		public void Initialize(object instance, ExecutableGraph graph, IGlobalDependencyResolver? resolver = null)
 		{
@@ -26,22 +29,20 @@ namespace GSS.Core.Runtime.Memory
 			StateTimer = 0f;
 			ErrorMessage = null;
 			Accumulator = GssValue.Null;
+			_callStackCount = 0;
+			_currentBaseRegisterIndex = 0;
 
 			EnsureCapacity(ref _registers, graph.RequiredRegisters);
 			EnsureCapacity(ref _argBuffer, 16);
+			EnsureCallStackCapacity(16);
 		}
 
-		public void SetRegister(int index, GssValue value)
+		public ref GssValue GetRegisterRef(int index)
 		{
-			_registers[index] = value;
+			return ref _registers[_currentBaseRegisterIndex + index];
 		}
 
-		public GssValue GetRegister(int index)
-		{
-			return _registers[index];
-		}
-
-		public void SetArg(int index, GssValue value)
+		public void SetArg(int index, in GssValue value)
 		{
 			if (index >= _argBuffer.Length)
 			{
@@ -53,6 +54,33 @@ namespace GSS.Core.Runtime.Memory
 		public ReadOnlySpan<GssValue> GetArgBufferSpan(int count)
 		{
 			return new ReadOnlySpan<GssValue>(_argBuffer, 0, count);
+		}
+
+		public void PushFrame(int returnIp, int requestedRegisters)
+		{
+			if (_callStackCount >= _callStack.Length)
+			{
+				EnsureCallStackCapacity(_callStack.Length * 2);
+			}
+
+			_callStack[_callStackCount++] = new CallFrame(returnIp, _currentBaseRegisterIndex);
+			_currentBaseRegisterIndex += requestedRegisters;
+
+			EnsureCapacity(ref _registers, _currentBaseRegisterIndex + requestedRegisters);
+		}
+
+		public bool TryPopFrame(out int returnIp)
+		{
+			if (_callStackCount == 0)
+			{
+				returnIp = -1;
+				return false;
+			}
+
+			var frame = _callStack[--_callStackCount];
+			returnIp = frame.ReturnInstructionPointer;
+			_currentBaseRegisterIndex = frame.BaseRegisterIndex;
+			return true;
 		}
 
 		public void SetError(string message)
@@ -77,16 +105,26 @@ namespace GSS.Core.Runtime.Memory
 			InstructionPointer = 0;
 			StateTimer = 0f;
 			Accumulator = GssValue.Null;
+			_callStackCount = 0;
+			_currentBaseRegisterIndex = 0;
 
-			Array.Clear(_registers);
-			Array.Clear(_argBuffer);
+			Array.Clear(_registers, 0, _registers.Length);
+			Array.Clear(_argBuffer, 0, _argBuffer.Length);
 		}
 
 		private static void EnsureCapacity(ref GssValue[] array, int requiredSize)
 		{
 			if (array.Length < requiredSize)
 			{
-				array = new GssValue[requiredSize];
+				Array.Resize(ref array, requiredSize * 2);
+			}
+		}
+
+		private void EnsureCallStackCapacity(int requiredSize)
+		{
+			if (_callStack.Length < requiredSize)
+			{
+				Array.Resize(ref _callStack, requiredSize);
 			}
 		}
 	}

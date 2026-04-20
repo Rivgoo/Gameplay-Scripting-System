@@ -37,7 +37,7 @@ namespace GSS.Sharp.Compilation
 			var loweredTree = Lowerer.Lower(boundTree);
 
 			var emitter = new BytecodeEmitter();
-			var graph = emitter.Emit(loweredTree, binder.GetAllocatedVariableCount());
+			var graph = emitter.Emit(loweredTree, binder.Allocator);
 
 			return graph;
 		}

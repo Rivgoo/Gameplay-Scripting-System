@@ -1,6 +1,13 @@
 <Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="GSS.ConsoleTools/GSS.ConsoleTools.csproj" Id="107ecc9c-cbdb-41da-b25d-e57c0b778e77" />
   <Project Path="GSS.Core.Tests/Gss.Core.Tests.csproj" Id="c2169f3f-56d2-491a-95b9-9fa6d1a5d174" />
   <Project Path="GSS.Core/GSS.Core.csproj" />
+  <Project Path="GSS.Generators/GSS.Generators.csproj" Id="c69c51d9-c79f-44b3-b3ff-fb8a2f12dd3b" />
   <Project Path="GSS.Sharp.Tests/GSS.Sharp.Tests.csproj" Id="8a0450ed-c903-4b1b-943e-76966e04d63a" />
   <Project Path="GSS.Sharp/GSS.Sharp.csproj" Id="3395fa59-983f-4157-8a9d-433836e83493" />
 </Solution>

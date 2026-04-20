@@ -6,6 +6,7 @@
 		AssignmentExpression, ApiAssignmentExpression, UnaryExpression,
 		BinaryExpression, CallExpression, ConversionExpression,
 		IndexExpression, IndexAssignmentExpression,
+		TernaryExpression,
 
 		BlockStatement, ExpressionStatement, VariableDeclaration,
 		IfStatement, WhileStatement, ReturnStatement, LabelStatement,

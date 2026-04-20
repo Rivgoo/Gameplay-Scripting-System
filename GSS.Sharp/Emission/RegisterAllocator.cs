@@ -1,31 +1,32 @@
 ﻿namespace GSS.Sharp.Emission
 {
-	internal sealed class RegisterAllocator
+	public sealed class RegisterAllocator
 	{
-		private readonly int _variableCount;
-		private int _tempStart;
+		private int _nextRegister;
 		private int _maxAllocated;
-		private readonly Stack<int> _freeTemps = new();
+		private readonly Stack<int> _freeRegisters = new();
 
-		public RegisterAllocator(int variableCount)
+		public RegisterAllocator()
 		{
-			_variableCount = variableCount;
-			_tempStart = variableCount;
-			_maxAllocated = variableCount;
+			_nextRegister = 0;
+			_maxAllocated = 0;
 		}
 
-		public int AllocateTemp()
+		public int Allocate()
 		{
-			if (_freeTemps.Count > 0) return _freeTemps.Pop();
+			if (_freeRegisters.Count > 0)
+			{
+				return _freeRegisters.Pop();
+			}
 
-			int reg = _tempStart++;
-			if (_tempStart > _maxAllocated) _maxAllocated = _tempStart;
+			int reg = _nextRegister++;
+			if (_nextRegister > _maxAllocated) _maxAllocated = _nextRegister;
 			return reg;
 		}
 
-		public void FreeTemp(int reg)
+		public void Free(int register)
 		{
-			if (reg >= _variableCount) _freeTemps.Push(reg);
+			_freeRegisters.Push(register);
 		}
 
 		public int GetTotalRequiredRegisters() => _maxAllocated;

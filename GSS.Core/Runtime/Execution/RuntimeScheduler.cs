@@ -1,10 +1,8 @@
-﻿using System.Collections;
-using GSS.Core.ApiBinding.Abstractions;
+﻿using GSS.Core.ApiBinding.Abstractions;
 using GSS.Core.ApiBinding.Models;
 using GSS.Core.Compiler.Emission;
 using GSS.Core.Runtime.Enums;
 using GSS.Core.Runtime.Events.Abstractions;
-using GSS.Core.Runtime.Exceptions;
 using GSS.Core.Runtime.Helpers;
 using GSS.Core.Runtime.Memory;
 
@@ -18,6 +16,9 @@ namespace GSS.Core.Runtime.Execution
 		public IGlobalDependencyResolver? GlobalResolver { get; set; }
 		public int MaxStepsPerTick { get; set; } = 10000;
 		public Action<Exception, RuntimeExecutionContext>? OnScriptFaulted { get; set; }
+
+		public int ActiveContextsCount => _activeContexts.Count;
+		public bool IsRunning => _activeContexts.Count > 0;
 
 		public RuntimeScheduler(ExecutionContextPool pool, int initialCapacity = 256)
 		{
@@ -42,10 +43,11 @@ namespace GSS.Core.Runtime.Execution
 
 				try
 				{
-					var state = RunContext(context);
+					var state = ExecuteLoop(context);
+
 					if (state == ExecutionState.Failure)
 					{
-						var ex = new GssRuntimeException(context.ErrorMessage ?? "Unknown execution failure.");
+						var ex = new Exception(context.ErrorMessage ?? "Unknown VM failure.");
 						OnScriptFaulted?.Invoke(ex, context);
 						RemoveContextAt(i);
 					}
@@ -62,129 +64,129 @@ namespace GSS.Core.Runtime.Execution
 			}
 		}
 
-		private ExecutionState RunContext(RuntimeExecutionContext ctx)
+		private ExecutionState ExecuteLoop(RuntimeExecutionContext ctx)
 		{
-			var instructions = ctx.Graph.Instructions;
-			var constants = ctx.Graph.ConstantsPool;
-			var metadata = ctx.Graph.MetadataPool;
+			ReadOnlySpan<Instruction> instructions = ctx.Graph.Instructions;
+			ReadOnlySpan<GssValue> constants = ctx.Graph.ConstantsPool;
+			ReadOnlySpan<object> metadata = ctx.Graph.MetadataPool;
+
 			int maxSteps = MaxStepsPerTick;
 			int steps = 0;
 
 			ref int ip = ref ctx.InstructionPointer;
+			ref GssValue acc = ref ctx.Accumulator;
 
 			while (ip >= 0 && ip < instructions.Length)
 			{
 				if (steps++ >= maxSteps) return ExecutionState.Running;
 
-				var inst = instructions[ip];
+				ref readonly Instruction inst = ref instructions[ip];
 
 				switch (inst.Code)
 				{
 					case OpCode.Nop: ip++; break;
+					case OpCode.Halt: return ExecutionState.Success;
+					case OpCode.Abort: ctx.SetError("Script explicitly aborted."); return ExecutionState.Failure;
+					case OpCode.Wait:
+						if (ctx.StateTimer >= acc.AsFloat) { ctx.StateTimer = 0f; ip++; }
+						else return ExecutionState.Running;
+						break;
 					case OpCode.Jump: ip = inst.Op1; break;
-					case OpCode.BranchTrue: ip = ctx.Accumulator.AsBool ? inst.Op1 : inst.Op2; break;
-					case OpCode.BranchFalse: ip = !ctx.Accumulator.AsBool ? inst.Op1 : inst.Op2; break;
-					case OpCode.LoadConst: ctx.Accumulator = constants[inst.Op1]; ip++; break;
-					case OpCode.LoadReg: ctx.Accumulator = ctx.GetRegister(inst.Op1); ip++; break;
-					case OpCode.StoreReg: ctx.SetRegister(inst.Op1, ctx.Accumulator); ip++; break;
-					case OpCode.PushArg: ctx.SetArg(inst.Op2, ctx.GetRegister(inst.Op1)); ip++; break;
-
+					case OpCode.BranchTrue: ip = acc.AsBool ? inst.Op1 : inst.Op2; break;
+					case OpCode.BranchFalse: ip = !acc.AsBool ? inst.Op1 : inst.Op2; break;
+					case OpCode.LoadConst: acc = constants[inst.Op1]; ip++; break;
+					case OpCode.LoadReg: acc = ctx.GetRegisterRef(inst.Op1); ip++; break;
+					case OpCode.StoreReg: ctx.GetRegisterRef(inst.Op1) = acc; ip++; break;
+					case OpCode.PushArg: ctx.SetArg(inst.Op2, ctx.GetRegisterRef(inst.Op1)); ip++; break;
 					case OpCode.CallMethod:
 						var method = (IMethodMetadata)metadata[inst.Op1];
-						ctx.Accumulator = method.Invoke(ctx.TargetInstance, ctx.GetArgBufferSpan(inst.Op2));
-						ip++;
-						break;
-
+						acc = method.Invoke(ctx.TargetInstance, ctx.GetArgBufferSpan(inst.Op2)); ip++; break;
 					case OpCode.LoadProp:
 						var propGet = (IPropertyMetadata)metadata[inst.Op1];
-						ctx.Accumulator = propGet.GetValue(ctx.TargetInstance);
-						ip++;
-						break;
-
+						acc = propGet.GetValue(ctx.TargetInstance); ip++; break;
 					case OpCode.StoreProp:
 						var propSet = (IPropertyMetadata)metadata[inst.Op1];
-						propSet.SetValue(ctx.TargetInstance, ctx.Accumulator);
-						ip++;
-						break;
+						propSet.SetValue(ctx.TargetInstance, acc); ip++; break;
 
-					case OpCode.AddInt: ctx.Accumulator = GssValue.FromInt(ctx.Accumulator.AsInt + ctx.GetRegister(inst.Op1).AsInt); ip++; break;
-					case OpCode.SubInt: ctx.Accumulator = GssValue.FromInt(ctx.Accumulator.AsInt - ctx.GetRegister(inst.Op1).AsInt); ip++; break;
-					case OpCode.MulInt: ctx.Accumulator = GssValue.FromInt(ctx.Accumulator.AsInt * ctx.GetRegister(inst.Op1).AsInt); ip++; break;
+					// Arithmetic
+					case OpCode.AddInt: acc = GssValue.FromInt(acc.AsInt + ctx.GetRegisterRef(inst.Op1).AsInt); ip++; break;
+					case OpCode.SubInt: acc = GssValue.FromInt(acc.AsInt - ctx.GetRegisterRef(inst.Op1).AsInt); ip++; break;
+					case OpCode.MulInt: acc = GssValue.FromInt(acc.AsInt * ctx.GetRegisterRef(inst.Op1).AsInt); ip++; break;
 					case OpCode.DivInt:
-						int rDiv = ctx.GetRegister(inst.Op1).AsInt;
-						if (rDiv == 0) { ctx.SetError("Divide by zero."); return ExecutionState.Failure; }
-						ctx.Accumulator = GssValue.FromInt(ctx.Accumulator.AsInt / rDiv); ip++; break;
+						int divI = ctx.GetRegisterRef(inst.Op1).AsInt;
+						if (divI == 0) { ctx.SetError("Divide by zero."); return ExecutionState.Failure; }
+						acc = GssValue.FromInt(acc.AsInt / divI); ip++; break;
 					case OpCode.ModInt:
-						int rMod = ctx.GetRegister(inst.Op1).AsInt;
-						if (rMod == 0) { ctx.SetError("Modulo by zero."); return ExecutionState.Failure; }
-						ctx.Accumulator = GssValue.FromInt(ctx.Accumulator.AsInt % rMod); ip++; break;
+						int modI = ctx.GetRegisterRef(inst.Op1).AsInt;
+						if (modI == 0) { ctx.SetError("Modulo by zero."); return ExecutionState.Failure; }
+						acc = GssValue.FromInt(acc.AsInt % modI); ip++; break;
 
-					case OpCode.AddFloat: ctx.Accumulator = GssValue.FromFloat(ctx.Accumulator.AsFloat + ctx.GetRegister(inst.Op1).AsFloat); ip++; break;
-					case OpCode.SubFloat: ctx.Accumulator = GssValue.FromFloat(ctx.Accumulator.AsFloat - ctx.GetRegister(inst.Op1).AsFloat); ip++; break;
-					case OpCode.MulFloat: ctx.Accumulator = GssValue.FromFloat(ctx.Accumulator.AsFloat * ctx.GetRegister(inst.Op1).AsFloat); ip++; break;
+					case OpCode.AddFloat: acc = GssValue.FromFloat(acc.AsFloat + ctx.GetRegisterRef(inst.Op1).AsFloat); ip++; break;
+					case OpCode.SubFloat: acc = GssValue.FromFloat(acc.AsFloat - ctx.GetRegisterRef(inst.Op1).AsFloat); ip++; break;
+					case OpCode.MulFloat: acc = GssValue.FromFloat(acc.AsFloat * ctx.GetRegisterRef(inst.Op1).AsFloat); ip++; break;
 					case OpCode.DivFloat:
-						float rDivF = ctx.GetRegister(inst.Op1).AsFloat;
-						if (rDivF == 0f) { ctx.SetError("Divide by zero."); return ExecutionState.Failure; }
-						ctx.Accumulator = GssValue.FromFloat(ctx.Accumulator.AsFloat / rDivF); ip++; break;
+						float divF = ctx.GetRegisterRef(inst.Op1).AsFloat;
+						if (divF == 0f) { ctx.SetError("Divide by zero."); return ExecutionState.Failure; }
+						acc = GssValue.FromFloat(acc.AsFloat / divF); ip++; break;
+					case OpCode.ModFloat:
+						float modF = ctx.GetRegisterRef(inst.Op1).AsFloat;
+						if (modF == 0f) { ctx.SetError("Modulo by zero."); return ExecutionState.Failure; }
+						acc = GssValue.FromFloat(acc.AsFloat % modF); ip++; break;
 
+					// String
 					case OpCode.AddString:
-						string left = ctx.Accumulator.GetAsString();
-						string right = ctx.GetRegister(inst.Op1).GetAsString();
-						ctx.Accumulator = GssValue.FromObject(left + right);
-						ip++; break;
+						acc = GssValue.FromObject(acc.GetAsString() + ctx.GetRegisterRef(inst.Op1).GetAsString()); ip++; break;
+					case OpCode.EqString:
+						acc = GssValue.FromBool(acc.GetAsString() == ctx.GetRegisterRef(inst.Op1).GetAsString()); ip++; break;
+					case OpCode.NeqString:
+						acc = GssValue.FromBool(acc.GetAsString() != ctx.GetRegisterRef(inst.Op1).GetAsString()); ip++; break;
 
-					case OpCode.EqInt: ctx.Accumulator = GssValue.FromBool(ctx.Accumulator.AsInt == ctx.GetRegister(inst.Op1).AsInt); ip++; break;
-					case OpCode.NeqInt: ctx.Accumulator = GssValue.FromBool(ctx.Accumulator.AsInt != ctx.GetRegister(inst.Op1).AsInt); ip++; break;
-					case OpCode.LtInt: ctx.Accumulator = GssValue.FromBool(ctx.Accumulator.AsInt < ctx.GetRegister(inst.Op1).AsInt); ip++; break;
-					case OpCode.GtInt: ctx.Accumulator = GssValue.FromBool(ctx.Accumulator.AsInt > ctx.GetRegister(inst.Op1).AsInt); ip++; break;
-					case OpCode.LteInt: ctx.Accumulator = GssValue.FromBool(ctx.Accumulator.AsInt <= ctx.GetRegister(inst.Op1).AsInt); ip++; break;
-					case OpCode.GteInt: ctx.Accumulator = GssValue.FromBool(ctx.Accumulator.AsInt >= ctx.GetRegister(inst.Op1).AsInt); ip++; break;
+					// Comparisons
+					case OpCode.EqInt: acc = GssValue.FromBool(acc.AsInt == ctx.GetRegisterRef(inst.Op1).AsInt); ip++; break;
+					case OpCode.NeqInt: acc = GssValue.FromBool(acc.AsInt != ctx.GetRegisterRef(inst.Op1).AsInt); ip++; break;
+					case OpCode.LtInt: acc = GssValue.FromBool(acc.AsInt < ctx.GetRegisterRef(inst.Op1).AsInt); ip++; break;
+					case OpCode.GtInt: acc = GssValue.FromBool(acc.AsInt > ctx.GetRegisterRef(inst.Op1).AsInt); ip++; break;
+					case OpCode.LteInt: acc = GssValue.FromBool(acc.AsInt <= ctx.GetRegisterRef(inst.Op1).AsInt); ip++; break;
+					case OpCode.GteInt: acc = GssValue.FromBool(acc.AsInt >= ctx.GetRegisterRef(inst.Op1).AsInt); ip++; break;
+					case OpCode.EqFloat: acc = GssValue.FromBool(acc.AsFloat == ctx.GetRegisterRef(inst.Op1).AsFloat); ip++; break;
+					case OpCode.NeqFloat: acc = GssValue.FromBool(acc.AsFloat != ctx.GetRegisterRef(inst.Op1).AsFloat); ip++; break;
+					case OpCode.LtFloat: acc = GssValue.FromBool(acc.AsFloat < ctx.GetRegisterRef(inst.Op1).AsFloat); ip++; break;
+					case OpCode.GtFloat: acc = GssValue.FromBool(acc.AsFloat > ctx.GetRegisterRef(inst.Op1).AsFloat); ip++; break;
+					case OpCode.LteFloat: acc = GssValue.FromBool(acc.AsFloat <= ctx.GetRegisterRef(inst.Op1).AsFloat); ip++; break;
+					case OpCode.GteFloat: acc = GssValue.FromBool(acc.AsFloat >= ctx.GetRegisterRef(inst.Op1).AsFloat); ip++; break;
 
-					case OpCode.EqFloat: ctx.Accumulator = GssValue.FromBool(ctx.Accumulator.AsFloat == ctx.GetRegister(inst.Op1).AsFloat); ip++; break;
-					case OpCode.NeqFloat: ctx.Accumulator = GssValue.FromBool(ctx.Accumulator.AsFloat != ctx.GetRegister(inst.Op1).AsFloat); ip++; break;
-					case OpCode.LtFloat: ctx.Accumulator = GssValue.FromBool(ctx.Accumulator.AsFloat < ctx.GetRegister(inst.Op1).AsFloat); ip++; break;
-					case OpCode.GtFloat: ctx.Accumulator = GssValue.FromBool(ctx.Accumulator.AsFloat > ctx.GetRegister(inst.Op1).AsFloat); ip++; break;
-					case OpCode.LteFloat: ctx.Accumulator = GssValue.FromBool(ctx.Accumulator.AsFloat <= ctx.GetRegister(inst.Op1).AsFloat); ip++; break;
-					case OpCode.GteFloat: ctx.Accumulator = GssValue.FromBool(ctx.Accumulator.AsFloat >= ctx.GetRegister(inst.Op1).AsFloat); ip++; break;
+					// Boolean
+					case OpCode.EqBool: acc = GssValue.FromBool(acc.AsBool == ctx.GetRegisterRef(inst.Op1).AsBool); ip++; break;
+					case OpCode.NeqBool: acc = GssValue.FromBool(acc.AsBool != ctx.GetRegisterRef(inst.Op1).AsBool); ip++; break;
+					case OpCode.AndBool: acc = GssValue.FromBool(acc.AsBool & ctx.GetRegisterRef(inst.Op1).AsBool); ip++; break;
+					case OpCode.OrBool: acc = GssValue.FromBool(acc.AsBool | ctx.GetRegisterRef(inst.Op1).AsBool); ip++; break;
+					case OpCode.XorBool: acc = GssValue.FromBool(acc.AsBool ^ ctx.GetRegisterRef(inst.Op1).AsBool); ip++; break;
+					case OpCode.NotBool: acc = GssValue.FromBool(!acc.AsBool); ip++; break;
 
-					case OpCode.NotBool: ctx.Accumulator = GssValue.FromBool(!ctx.Accumulator.AsBool); ip++; break;
-					case OpCode.NegateInt: ctx.Accumulator = GssValue.FromInt(-ctx.Accumulator.AsInt); ip++; break;
-					case OpCode.NegateFloat: ctx.Accumulator = GssValue.FromFloat(-ctx.Accumulator.AsFloat); ip++; break;
-					case OpCode.BitNotInt: ctx.Accumulator = GssValue.FromInt(~ctx.Accumulator.AsInt); ip++; break;
-					case OpCode.BitNotLong: ctx.Accumulator = GssValue.FromLong(~ctx.Accumulator.AsLong); ip++; break;
+					// Unary / Casts
+					case OpCode.NegateInt: acc = GssValue.FromInt(-acc.AsInt); ip++; break;
+					case OpCode.NegateFloat: acc = GssValue.FromFloat(-acc.AsFloat); ip++; break;
+					case OpCode.BitNotInt: acc = GssValue.FromInt(~acc.AsInt); ip++; break;
+					case OpCode.CastIntToFloat: acc = GssValue.FromFloat(acc.AsInt); ip++; break;
+					case OpCode.CastFloatToInt: acc = GssValue.FromInt((int)acc.AsFloat); ip++; break;
+					case OpCode.CastAnyToString: acc = GssValue.FromObject(acc.GetAsString()); ip++; break;
 
-					case OpCode.CastIntToFloat: ctx.Accumulator = GssValue.FromFloat(ctx.Accumulator.AsInt); ip++; break;
-					case OpCode.CastFloatToInt: ctx.Accumulator = GssValue.FromInt((int)ctx.Accumulator.AsFloat); ip++; break;
-					case OpCode.CastAnyToString: ctx.Accumulator = GssValue.FromObject(ctx.Accumulator.GetAsString()); ip++; break;
-
-					case OpCode.LoadElement:
-						if (!TryLoadElement(ctx.GetRegister(inst.Op1).AsObject, ctx.Accumulator.AsInt, out var valLoad, out string errLoad))
-						{
-							ctx.SetError(errLoad); return ExecutionState.Failure;
-						}
-						ctx.Accumulator = valLoad;
-						ip++; break;
-
-					case OpCode.StoreElement:
-						if (!TryStoreElement(ctx.GetRegister(inst.Op1).AsObject, ctx.GetRegister(inst.Op2).AsInt, ctx.Accumulator, out string errStore))
-						{
-							ctx.SetError(errStore); return ExecutionState.Failure;
-						}
-						ip++; break;
-
-					case OpCode.Wait:
-						if (ctx.StateTimer >= ctx.Accumulator.AsFloat)
-						{
-							ctx.StateTimer = 0f; ip++;
-						}
-						else
-						{
-							return ExecutionState.Running;
-						}
-						break;
-
-					case OpCode.Halt:
-						return ExecutionState.Success;
+					// Collections
+					case OpCode.CreateArray: acc = GssValue.FromObject(new GssValue[acc.AsInt]); ip++; break;
+					case OpCode.CreateList: acc = GssValue.FromObject(new List<GssValue>()); ip++; break;
+					case OpCode.GetArrayLength:
+						var arrLen = (GssValue[])ctx.GetRegisterRef(inst.Op1).AsObject!;
+						acc = GssValue.FromInt(arrLen.Length); ip++; break;
+					case OpCode.LoadElement_GssArray:
+						var gssArrLoad = (GssValue[])ctx.GetRegisterRef(inst.Op1).AsObject!;
+						int idxGssArr = acc.AsInt;
+						if (idxGssArr < 0 || idxGssArr >= gssArrLoad.Length) { ctx.SetError("Index out of bounds."); return ExecutionState.Failure; }
+						acc = gssArrLoad[idxGssArr]; ip++; break;
+					case OpCode.StoreElement_GssArray:
+						var gssArrStore = (GssValue[])ctx.GetRegisterRef(inst.Op1).AsObject!;
+						int idxGssStore = ctx.GetRegisterRef(inst.Op2).AsInt;
+						if (idxGssStore < 0 || idxGssStore >= gssArrStore.Length) { ctx.SetError("Index out of bounds."); return ExecutionState.Failure; }
+						gssArrStore[idxGssStore] = acc; ip++; break;
 
 					default:
 						ctx.SetError($"Unsupported OpCode execution: {inst.Code}");
@@ -192,52 +194,8 @@ namespace GSS.Core.Runtime.Execution
 				}
 			}
 
-			ctx.SetError("Instruction pointer went out of bounds without Halt.");
+			ctx.SetError("Instruction pointer out of bounds.");
 			return ExecutionState.Failure;
-		}
-
-		private bool TryLoadElement(object? col, int index, out GssValue result, out string error)
-		{
-			result = GssValue.Null; error = string.Empty;
-			if (col is GssValue[] array)
-			{
-				if (index < 0 || index >= array.Length) { error = "Index out of bounds."; return false; }
-				result = array[index]; return true;
-			}
-			if (col is List<GssValue> list)
-			{
-				if (index < 0 || index >= list.Count) { error = "Index out of bounds."; return false; }
-				result = list[index]; return true;
-			}
-			if (col is IList ilist)
-			{
-				if (index < 0 || index >= ilist.Count) { error = "Index out of bounds."; return false; }
-				result = GssValuePacker.Pack(ilist[index]); return true;
-			}
-			error = "Target is not a valid collection.";
-			return false;
-		}
-
-		private bool TryStoreElement(object? col, int index, GssValue value, out string error)
-		{
-			error = string.Empty;
-			if (col is GssValue[] array)
-			{
-				if (index < 0 || index >= array.Length) { error = "Index out of bounds."; return false; }
-				array[index] = value; return true;
-			}
-			if (col is List<GssValue> list)
-			{
-				if (index < 0 || index >= list.Count) { error = "Index out of bounds."; return false; }
-				list[index] = value; return true;
-			}
-			if (col is IList ilist)
-			{
-				if (index < 0 || index >= ilist.Count) { error = "Index out of bounds."; return false; }
-				ilist[index] = value.ToBoxedValue(); return true;
-			}
-			error = "Target is not a valid modifiable collection.";
-			return false;
 		}
 
 		private void RemoveContextAt(int index)
