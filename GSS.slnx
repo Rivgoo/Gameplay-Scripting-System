@@ -1,4 +1,6 @@
 <Solution>
-  <Project Path="GSS.Core.Tests/Gss.Core.Tests.csproj" Id="c2169f3f-56d2-491a-95b9-9fa6d1a5d174" DisplayName="GSS.Core.Tests" />
+  <Project Path="GSS.Core.Tests/Gss.Core.Tests.csproj" Id="c2169f3f-56d2-491a-95b9-9fa6d1a5d174" />
   <Project Path="GSS.Core/GSS.Core.csproj" />
+  <Project Path="GSS.Sharp.Tests/GSS.Sharp.Tests.csproj" Id="8a0450ed-c903-4b1b-943e-76966e04d63a" />
+  <Project Path="GSS.Sharp/GSS.Sharp.csproj" Id="3395fa59-983f-4157-8a9d-433836e83493" />
 </Solution>
